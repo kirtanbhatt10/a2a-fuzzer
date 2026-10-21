@@ -27,13 +27,10 @@ def _req(method: str, params=None, id_=1) -> dict:
     return body
 
 
-def _nested(depth: int) -> dict:
-    node: dict = {}
-    root = node
-    for _ in range(depth):
-        node["a"] = {}
-        node = node["a"]
-    return root
+def _nested_raw(method: str, depth: int) -> bytes:
+    # Built as bytes: json.dumps hits the recursion limit on deep objects in Python < 3.12.
+    params = '{"a":' * depth + "{}" + "}" * depth
+    return ('{"jsonrpc":"2.0","id":1,"method":"%s","params":%s}' % (method, params)).encode()
 
 
 # --------------------------------------------------------------------------- #
@@ -125,7 +122,7 @@ def jsonrpc_cases(probe_method: str) -> List[TestCase]:
 
     add(TestCase(id="rpc.size.deep_nesting", category="resource",
                  description="Params nested 2,000 levels deep",
-                 body=_req(probe_method, params=_nested(2000))))
+                 raw=_nested_raw(probe_method, 2000)))
     add(TestCase(id="rpc.size.large_string", category="resource",
                  description=f"Params with a {MAX_STRING // 1024} KiB string",
                  body=_req(probe_method, params={"text": "A" * MAX_STRING})))

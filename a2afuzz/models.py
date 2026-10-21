@@ -29,6 +29,8 @@ class Severity(str, Enum):
 class TestCase(BaseModel):
     """A single request the fuzzer will send."""
 
+    __test__ = False  # stop pytest trying to collect this as a test class
+
     id: str
     category: str
     description: str
