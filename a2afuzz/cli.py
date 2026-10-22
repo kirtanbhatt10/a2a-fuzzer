@@ -1,106 +1,112 @@
-"""Command-line interface."""
+"""Typer command line interface for a2afuzz."""
 
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 from pathlib import Path
-from typing import List, Optional
+from typing import Annotated
 
 import typer
-from rich.console import Console
-from rich.table import Table
 
-from . import __version__
-from .generators import PROTOCOL_GENERATORS, build_cases
-from .models import Severity
-from .report import write_html, write_json, write_sarif
-from .runner import is_local, run
+from .checks import meets_severity
+from .generators import generate_cases
+from .report import write_reports
+from .runner import FuzzRunner, TargetAuthorizationError
 
-app = typer.Typer(add_completion=False, help="Conformance & robustness fuzzing for A2A / MCP "
-                  "JSON-RPC endpoints you own or are authorised to test.")
-console = Console()
-
-SEV_STYLE = {"high": "bold red", "medium": "yellow", "low": "cyan", "info": "dim"}
+app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    help="Bounded conformance and robustness fuzzing for agent JSON-RPC endpoints.",
+)
 
 
-def _parse_headers(values: List[str]) -> dict:
-    out = {}
-    for v in values:
-        if ":" not in v:
-            raise typer.BadParameter(f"header must be 'Name: value', got {v!r}")
-        k, val = v.split(":", 1)
-        out[k.strip()] = val.strip()
-    return out
+def _headers(values: list[str] | None) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for value in values or []:
+        if ":" not in value:
+            raise typer.BadParameter("headers must use 'Name: value' syntax")
+        name, header_value = value.split(":", 1)
+        if not name.strip():
+            raise typer.BadParameter("header name cannot be empty")
+        parsed[name.strip()] = header_value.strip()
+    return parsed
 
 
-@app.command("run")
-def run_cmd(
-    url: str = typer.Argument(..., help="JSON-RPC endpoint URL, e.g. http://localhost:9999/"),
-    protocol: str = typer.Option("a2a", "--protocol", "-p",
-                                 help=f"One of: {', '.join(sorted(PROTOCOL_GENERATORS))}"),
-    out: Path = typer.Option(Path("reports"), "--out", "-o", help="Report output directory"),
-    concurrency: int = typer.Option(4, help="Parallel requests"),
-    rate: float = typer.Option(10.0, help="Max requests per second (0 = unlimited)"),
-    timeout: float = typer.Option(10.0, help="Per-request timeout in seconds"),
-    header: List[str] = typer.Option([], "--header", "-H", help="Extra header 'Name: value'"),
-    only: List[str] = typer.Option([], "--only", help="Run only case-id prefixes or categories"),
-    fail_on: Optional[Severity] = typer.Option(
-        None, "--fail-on", help="Exit 1 if any finding is at or above this severity (CI)"),
-    authorized: bool = typer.Option(
-        False, "--i-am-authorized",
-        help="Required for non-local targets: confirms you own or may test this endpoint"),
-) -> None:
-    """Fuzz an endpoint and write JSON, HTML and SARIF reports."""
-    if not is_local(url) and not authorized:
-        console.print("[bold red]Refusing to run against a non-local target.[/]\n"
-                      "Only test endpoints you own or have written permission to test. "
-                      "Re-run with [bold]--i-am-authorized[/] to confirm.")
-        raise typer.Exit(2)
-
-    console.print(f"[bold]a2a-fuzzer {__version__}[/] → {url} ([cyan]{protocol}[/])")
-
-    def on_result(res):
-        mark = "[red]✗[/]" if res.findings else "[green]✓[/]"
-        console.print(f"  {mark} {res.case.id}", highlight=False)
-
-    report = asyncio.run(run(url, protocol=protocol, concurrency=concurrency, rate=rate,
-                             timeout=timeout, headers=_parse_headers(header),
-                             only=only or None, on_result=on_result))
-
-    out.mkdir(parents=True, exist_ok=True)
-    write_json(report, out / "a2afuzz.report.json")
-    write_html(report, out / "a2afuzz.report.html")
-    write_sarif(report, out / "a2afuzz.sarif")
-
-    counts = report.counts()
-    t = Table(title="Findings")
-    for s in ["high", "medium", "low", "info"]:
-        t.add_column(s.upper(), style=SEV_STYLE[s], justify="center")
-    t.add_row(*(str(counts[s]) for s in ["high", "medium", "low", "info"]))
-    console.print(t)
-    console.print(f"Reports written to [bold]{out}/[/]")
-
-    worst = report.max_severity()
-    if fail_on and worst and worst.rank >= fail_on.rank:
-        raise typer.Exit(1)
+def _selectors(values: list[str] | None) -> list[str]:
+    return [part.strip() for value in values or [] for part in value.split(",") if part.strip()]
 
 
 @app.command("list")
-def list_cmd(protocol: str = typer.Option("a2a", "--protocol", "-p")) -> None:
-    """List the test cases for a protocol."""
-    t = Table(title=f"{protocol} test cases")
-    t.add_column("id")
-    t.add_column("category")
-    t.add_column("description")
-    for c in build_cases(protocol):
-        t.add_row(c.id, c.category, c.description)
-    console.print(t)
+def list_cases(
+    protocol: Annotated[str, typer.Option("--protocol", "-p", help="a2a, mcp, or jsonrpc")] = "a2a",
+) -> None:
+    """List the finite probe set without making any network request."""
+
+    if protocol not in {"a2a", "mcp", "jsonrpc"}:
+        raise typer.BadParameter("protocol must be a2a, mcp, or jsonrpc")
+    for case in generate_cases(protocol):
+        typer.echo(f"{case.id:32} {case.category:16} {case.title}")
 
 
-@app.command("version")
-def version_cmd() -> None:
-    """Print the version."""
-    console.print(__version__)
+@app.command()
+def run(
+    url: Annotated[str, typer.Argument(help="JSON-RPC HTTP endpoint to test")],
+    protocol: Annotated[str, typer.Option("--protocol", "-p", help="a2a, mcp, or jsonrpc")] = "a2a",
+    out: Annotated[Path, typer.Option("--out", "-o", help="Report directory")] = Path("reports"),
+    concurrency: Annotated[int, typer.Option("--concurrency", min=1, help="Parallel requests")] = 4,
+    rate: Annotated[
+        float, typer.Option("--rate", min=0, help="Requests/second; 0 is unlimited")
+    ] = 10.0,
+    timeout: Annotated[
+        float, typer.Option("--timeout", min=0.1, help="Per-request timeout in seconds")
+    ] = 10.0,
+    header: Annotated[
+        list[str] | None, typer.Option("--header", "-H", help="Extra header: 'Name: value'")
+    ] = None,
+    only: Annotated[
+        list[str] | None,
+        typer.Option("--only", help="Case-id prefix or category; repeat or comma-separate"),
+    ] = None,
+    fail_on: Annotated[
+        str | None, typer.Option("--fail-on", help="Exit 1 for info, low, medium, or high findings")
+    ] = None,
+    i_am_authorized: Annotated[
+        bool, typer.Option("--i-am-authorized", help="Confirm authorization for a non-local target")
+    ] = False,
+) -> None:
+    """Run bounded probes and write JSON, HTML, and SARIF reports."""
+
+    if protocol not in {"a2a", "mcp", "jsonrpc"}:
+        raise typer.BadParameter("protocol must be a2a, mcp, or jsonrpc")
+    if fail_on is not None and fail_on not in {"info", "low", "medium", "high"}:
+        raise typer.BadParameter("--fail-on must be info, low, medium, or high")
+    try:
+        runner = FuzzRunner(
+            protocol=protocol,
+            concurrency=concurrency,
+            rate=rate,
+            timeout=timeout,
+            headers=_headers(header),
+        )
+        result = asyncio.run(runner.run(url, authorized=i_am_authorized, only=_selectors(only)))
+    except TargetAuthorizationError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    paths = write_reports(result, out)
+    counts = Counter(finding.severity for finding in result.findings)
+    severity_summary = (
+        f"high={counts['high']}, medium={counts['medium']}, "
+        f"low={counts['low']}, info={counts['info']}"
+    )
+    typer.echo(
+        f"Completed {len(result.cases)} cases: {len(result.findings)} findings "
+        f"({severity_summary})."
+    )
+    typer.echo("Reports: " + ", ".join(str(path) for path in paths.values()))
+    if any(meets_severity(finding, fail_on) for finding in result.findings):
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":
