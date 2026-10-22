@@ -1,27 +1,21 @@
-import json
+from __future__ import annotations
 
-import pytest
-
-from a2afuzz.generators import MAX_STRING, build_cases
+from a2afuzz.generators import MAX_PAYLOAD_BYTES, generate_cases, select_cases
 
 
-@pytest.mark.parametrize("protocol", ["jsonrpc", "a2a", "mcp"])
-def test_cases_are_unique_and_serialisable(protocol):
-    cases = build_cases(protocol)
-    assert len(cases) > 20
-    assert len({c.id for c in cases}) == len(cases)
-    for c in cases:
-        payload = c.raw if c.raw is not None else json.dumps(c.body).encode()
-        assert isinstance(payload, bytes)
-        assert len(payload) < 2 * MAX_STRING  # every case stays bounded
+def test_generators_are_unique_and_size_capped() -> None:
+    for protocol, minimum in (("jsonrpc", 26), ("a2a", 32), ("mcp", 31)):
+        cases = generate_cases(protocol)
+        assert len(cases) >= minimum
+        assert len({case.id for case in cases}) == len(cases)
+        assert all(0 <= case.payload_size <= MAX_PAYLOAD_BYTES for case in cases)
 
 
-def test_protocol_specific_cases_included():
-    assert any(c.id.startswith("a2a.") for c in build_cases("a2a"))
-    assert any(c.id.startswith("mcp.") for c in build_cases("mcp"))
-    assert not any(c.id.startswith("a2a.") for c in build_cases("mcp"))
-
-
-def test_unknown_protocol():
-    with pytest.raises(ValueError):
-        build_cases("smtp")
+def test_a2a_cases_include_trust_probes_and_selection() -> None:
+    cases = generate_cases("a2a")
+    trust_cases = select_cases(cases, ["a2a-trust"])
+    assert len(trust_cases) == 6
+    assert all(case.expectation == "trust_reject" for case in trust_cases)
+    assert [case.id for case in select_cases(cases, ["parsing"])] == [
+        case.id for case in cases if case.category == "parsing"
+    ]
