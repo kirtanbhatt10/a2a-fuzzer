@@ -28,6 +28,37 @@ def test_target_guard_only_allows_loopback_without_opt_in() -> None:
     validate_target("https://example.test/", authorized=True)
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:99999/",
+        "http://127.0.0.1:port/",
+        "ftp://127.0.0.1/",
+        "127.0.0.1:8080",
+        "http:///no-host",
+    ],
+)
+def test_malformed_targets_are_rejected_before_any_request(url: str) -> None:
+    transport = SuccessTransport()
+    runner = FuzzRunner(transport=transport, rate=0)
+    with pytest.raises(TargetAuthorizationError):
+        asyncio.run(runner.run(url, authorized=True))
+    assert transport.calls == []
+
+
+def test_runner_rejects_invalid_settings() -> None:
+    for kwargs in ({"concurrency": 0}, {"rate": -1}, {"timeout": 0}):
+        with pytest.raises(ValueError):
+            FuzzRunner(**kwargs)
+
+
+def test_run_timestamps_are_timezone_aware() -> None:
+    runner = FuzzRunner(protocol="jsonrpc", transport=SuccessTransport(), rate=0)
+    result = asyncio.run(runner.run("http://127.0.0.1:9000/", only=["method-unknown"]))
+    assert result.started_at.endswith("+00:00")
+    assert result.finished_at.endswith("+00:00")
+
+
 def test_runner_filters_cases_and_runs_with_injected_transport() -> None:
     transport = SuccessTransport()
     runner = FuzzRunner(protocol="a2a", transport=transport, concurrency=2, rate=0)
