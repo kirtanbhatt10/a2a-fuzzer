@@ -9,8 +9,9 @@ from typing import Annotated
 
 import typer
 
+from ._version import __version__
 from .checks import meets_severity
-from .generators import generate_cases
+from .generators import generate_cases, select_cases
 from .report import write_reports
 from .runner import FuzzRunner, TargetAuthorizationError
 
@@ -19,6 +20,32 @@ app = typer.Typer(
     no_args_is_help=True,
     help="Bounded conformance and robustness fuzzing for agent JSON-RPC endpoints.",
 )
+
+# Exit codes are part of the CLI contract (see README).
+EXIT_FINDINGS = 1
+EXIT_USAGE = 2
+EXIT_INTERRUPTED = 130
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"a2afuzz {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            callback=_version_callback,
+            is_eager=True,
+            help="Show the version and exit.",
+        ),
+    ] = False,
+) -> None:
+    """Bounded conformance and robustness fuzzing for agent JSON-RPC endpoints."""
 
 
 def _headers(values: list[str] | None) -> dict[str, str]:
@@ -81,6 +108,13 @@ def run(
         raise typer.BadParameter("protocol must be a2a, mcp, or jsonrpc")
     if fail_on is not None and fail_on not in {"info", "low", "medium", "high"}:
         raise typer.BadParameter("--fail-on must be info, low, medium, or high")
+    selectors = _selectors(only)
+    if selectors and not select_cases(generate_cases(protocol), selectors):
+        # A typo in --only must not turn into a silently "clean" CI run.
+        raise typer.BadParameter(
+            f"no {protocol} case matches {', '.join(selectors)}; see 'a2afuzz list -p {protocol}'",
+            param_hint="'--only'",
+        )
     try:
         runner = FuzzRunner(
             protocol=protocol,
@@ -89,12 +123,22 @@ def run(
             timeout=timeout,
             headers=_headers(header),
         )
-        result = asyncio.run(runner.run(url, authorized=i_am_authorized, only=_selectors(only)))
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    try:
+        result = asyncio.run(runner.run(url, authorized=i_am_authorized, only=selectors))
     except TargetAuthorizationError as exc:
         typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(code=2) from exc
+        raise typer.Exit(code=EXIT_USAGE) from exc
+    except KeyboardInterrupt as exc:
+        typer.echo("Interrupted; no reports were written.", err=True)
+        raise typer.Exit(code=EXIT_INTERRUPTED) from exc
 
-    paths = write_reports(result, out)
+    try:
+        paths = write_reports(result, out)
+    except OSError as exc:
+        typer.echo(f"Error: could not write reports to {out}: {exc}", err=True)
+        raise typer.Exit(code=EXIT_USAGE) from exc
     counts = Counter(finding.severity for finding in result.findings)
     severity_summary = (
         f"high={counts['high']}, medium={counts['medium']}, "
@@ -106,7 +150,7 @@ def run(
     )
     typer.echo("Reports: " + ", ".join(str(path) for path in paths.values()))
     if any(meets_severity(finding, fail_on) for finding in result.findings):
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=EXIT_FINDINGS)
 
 
 if __name__ == "__main__":

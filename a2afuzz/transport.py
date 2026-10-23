@@ -47,7 +47,9 @@ class AsyncHttpTransport:
 
         await self.open()
         assert self._client is not None  # narrows for type checkers
-        headers = {"content-type": "application/json", "accept": "application/json"}
+        # httpx.Headers merges case-insensitively, so ``-H "Accept: ..."`` replaces
+        # the default instead of sending two Accept headers.
+        headers = httpx.Headers({"content-type": "application/json", "accept": "application/json"})
         headers.update(self.headers)
         started = time.perf_counter()
         try:
@@ -76,8 +78,10 @@ class AsyncHttpTransport:
                 error=f"timeout: {exc}",
                 timed_out=True,
             )
-        except httpx.RequestError as exc:
+        except (httpx.HTTPError, httpx.InvalidURL) as exc:
+            # Connection refused/reset, protocol violations, decoding failures and
+            # similar problems are findings about the target, not tool crashes.
             return TransportResponse(
                 elapsed_ms=(time.perf_counter() - started) * 1_000,
-                error=f"network error: {exc}",
+                error=f"network error: {type(exc).__name__}: {exc}",
             )
