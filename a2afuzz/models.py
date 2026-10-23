@@ -9,6 +9,9 @@ from dataclasses import dataclass, field
 class TestCase:
     """One bounded request and the property it is intended to exercise."""
 
+    # Not a pytest test class, despite the name; keep collectors from warning.
+    __test__ = False
+
     id: str
     category: str
     title: str

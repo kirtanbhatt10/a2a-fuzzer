@@ -9,6 +9,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from ._version import __version__
 from .models import CaseResult, Finding, RunResult
 
 
@@ -55,7 +56,7 @@ def to_json_document(run: RunResult) -> dict[str, Any]:
     counts = Counter(finding.severity for finding in run.findings)
     return {
         "schemaVersion": "1.0",
-        "tool": {"name": "a2afuzz", "version": "0.1.0"},
+        "tool": {"name": "a2afuzz", "version": __version__},
         "target": run.target,
         "protocol": run.protocol,
         "startedAt": run.started_at,
@@ -215,7 +216,12 @@ def to_sarif_document(run: RunResult) -> dict[str, Any]:
         "runs": [
             {
                 "tool": {
-                    "driver": {"name": "a2afuzz", "version": "0.1.0", "rules": list(rules.values())}
+                    "driver": {
+                        "name": "a2afuzz",
+                        "version": __version__,
+                        "informationUri": "https://github.com/kirtanbhatt10/a2a-fuzzer",
+                        "rules": list(rules.values()),
+                    }
                 },
                 "results": results,
             }
