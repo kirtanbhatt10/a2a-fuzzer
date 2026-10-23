@@ -6,7 +6,7 @@ import asyncio
 import ipaddress
 import time
 from collections.abc import Iterable, Mapping
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Protocol
 from urllib.parse import urlparse
 
@@ -41,7 +41,17 @@ def is_local_target(url: str) -> bool:
 
 
 def validate_target(url: str, *, authorized: bool) -> None:
-    parsed = urlparse(url)
+    """Reject malformed URLs and, unless *authorized*, any non-loopback target.
+
+    This runs before any network I/O so a typo can never reach a third party.
+    """
+
+    try:
+        parsed = urlparse(url)
+        # Accessing ``port`` validates it; out-of-range or non-numeric ports raise.
+        parsed.port  # noqa: B018
+    except ValueError as exc:
+        raise TargetAuthorizationError(f"Invalid target URL: {exc}.") from exc
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise TargetAuthorizationError("Target must be an absolute http:// or https:// URL.")
     if not is_local_target(url) and not authorized:
@@ -102,7 +112,7 @@ class FuzzRunner:
     ) -> RunResult:
         validate_target(target, authorized=authorized)
         cases = select_cases(generate_cases(self.protocol), only)
-        started = datetime.now(UTC)
+        started = datetime.now(timezone.utc)
         semaphore = asyncio.Semaphore(self.concurrency)
         limiter = _RateLimiter(self.rate)
         transport = self.transport or AsyncHttpTransport(timeout=self.timeout, headers=self.headers)
@@ -127,7 +137,7 @@ class FuzzRunner:
             if owns_transport:
                 await transport.aclose()  # type: ignore[union-attr]
         completed.sort(key=lambda item: item[0])
-        finished = datetime.now(UTC)
+        finished = datetime.now(timezone.utc)
         return RunResult(
             target=target,
             protocol=self.protocol,
