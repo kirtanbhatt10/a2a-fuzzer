@@ -1,12 +1,25 @@
+<div align="center">
+
 # a2a-fuzzer
 
+**Bounded conformance and robustness fuzzing for agent-to-agent protocols.**
+
 [![CI](https://github.com/kirtanbhatt10/a2a-fuzzer/actions/workflows/ci.yml/badge.svg)](https://github.com/kirtanbhatt10/a2a-fuzzer/actions/workflows/ci.yml)
+![Version](https://img.shields.io/badge/version-0.2.0-informational)
 ![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+![SARIF](https://img.shields.io/badge/output-JSON%20%7C%20HTML%20%7C%20SARIF-orange)
 
-Bounded conformance and robustness fuzzing for agent-to-agent protocols.
+</div>
 
-Point `a2afuzz` at an **A2A**, **MCP**, or plain **JSON-RPC 2.0** HTTP endpoint you own. It sends a small, deterministic set of malformed and edge-case requests and tells you where the server crashes, leaks internals, accepts input it should reject, or trusts data a client should never control. Every run produces JSON, HTML, and SARIF reports, so it drops straight into CI and GitHub code scanning.
+Point `a2afuzz` at an **A2A**, **MCP**, or plain **JSON-RPC 2.0** HTTP endpoint you own. It sends a small, deterministic set of malformed and edge-case requests and tells you where the server:
+
+- **crashes** on bad input,
+- **leaks internals** such as stack traces, file paths, or credentials,
+- **accepts input** it should reject, or
+- **trusts data** a client should never control.
+
+Every run writes JSON, HTML, and SARIF reports, so it drops straight into CI and GitHub code scanning.
 
 > [!IMPORTANT]
 > Use this tool only on systems you own or have explicit written permission to test. It refuses any non-loopback target unless you pass `--i-am-authorized`. Requests and captured responses are capped at 256 KiB each; this is robustness testing, not load testing.
@@ -28,15 +41,17 @@ Point `a2afuzz` at an **A2A**, **MCP**, or plain **JSON-RPC 2.0** HTTP endpoint 
 
 ## Features
 
-- **Deterministic and finite.** 26 generic JSON-RPC cases, plus 6 A2A or 5 MCP trust-boundary cases. The same input set every run, so results are reproducible and diffable. List them with `a2afuzz list` without sending anything.
-- **Six response oracles**: crash, availability, info-leak, trust-boundary, validation, and conformance, each mapped to a severity.
-- **Safe by default.** Loopback-only unless explicitly authorized, URL validation before any network I/O, no redirects followed, bounded payloads and response captures, configurable rate limit and concurrency.
-- **CI-ready.** `--fail-on <severity>` sets the exit code; SARIF output uploads to GitHub code scanning.
-- **Small footprint.** Two runtime dependencies (`httpx`, `typer`). Python 3.10+ on Linux, macOS, and Windows.
+| | |
+| --- | --- |
+| **Deterministic and finite** | 26 generic JSON-RPC cases, plus 6 A2A or 5 MCP trust-boundary cases. The same inputs every run, so results are reproducible and diffable. Preview them with `a2afuzz list` without sending anything. |
+| **Six response oracles** | crash, availability, info-leak, trust-boundary, validation, and conformance, each mapped to a severity. |
+| **Safe by default** | Loopback-only unless explicitly authorized, URL validation before any network I/O, no redirects followed, bounded payloads and captures, configurable rate limit and concurrency. |
+| **CI-ready** | `--fail-on <severity>` sets the exit code; SARIF output uploads to GitHub code scanning. |
+| **Small footprint** | Two runtime dependencies (`httpx`, `typer`). Python 3.10+ on Linux, macOS, and Windows. |
 
 ## Install
 
-The package is not published to PyPI yet. Install it from GitHub:
+The package is not on PyPI yet. Install it straight from GitHub:
 
 ```bash
 pip install "git+https://github.com/kirtanbhatt10/a2a-fuzzer.git"
@@ -59,7 +74,7 @@ a2afuzz --version
 
 ## Quick start
 
-The repository ships a small demo agent (standard library only) with a deliberately vulnerable default mode and a hardened `--secure` mode.
+The repository ships a small demo agent (standard library only) with a deliberately **vulnerable** default mode and a **hardened** `--secure` mode.
 
 ```bash
 # Terminal 1: the vulnerable target
@@ -101,17 +116,17 @@ python -m a2afuzz ...          Same CLI, without the console script
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `-p, --protocol` | `a2a` | `a2a`, `mcp`, or `jsonrpc` |
-| `-o, --out` | `reports/` | Directory for the JSON, HTML, and SARIF reports (created if missing) |
+| `-p`, `--protocol` | `a2a` | `a2a`, `mcp`, or `jsonrpc` |
+| `-o`, `--out` | `reports/` | Directory for the JSON, HTML, and SARIF reports (created if missing) |
 | `--concurrency` | `4` | Maximum requests in flight |
 | `--rate` | `10` | Maximum requests per second; `0` means unlimited |
 | `--timeout` | `10` | Per-request timeout in seconds; responses slower than 80% of it are flagged |
-| `-H, --header` | none | Extra request header as `'Name: value'`; repeatable (for example an auth token) |
+| `-H`, `--header` | none | Extra request header as `'Name: value'`; repeatable (for example an auth token) |
 | `--only` | all | Case-ID prefix or category; repeatable or comma-separated |
-| `--fail-on` | none | Exit `1` if any finding is at or above `info`, `low`, `medium`, or `high` |
+| `--fail-on` | none | Exit 1 if any finding is at or above `info`, `low`, `medium`, or `high` |
 | `--i-am-authorized` | off | Required before probing any non-loopback host |
 
-Examples:
+### Examples
 
 ```bash
 # Only the trust-boundary and parsing cases
@@ -136,7 +151,7 @@ a2afuzz run http://127.0.0.1:3000/mcp -p mcp --fail-on medium
 
 ## What it checks
 
-Run `a2afuzz list -p <protocol>` to see every case. The suite covers:
+Run `a2afuzz list -p <protocol>` to see every case. In total that is **26** cases for `jsonrpc`, **32** for `a2a`, and **31** for `mcp`.
 
 | Category | Cases | Examples |
 | --- | --- | --- |
@@ -157,8 +172,8 @@ Each response is evaluated by these oracles:
 | `crash` | high | HTTP 5xx in response to malformed input |
 | `availability` | high / low | Timeouts (high); dropped connections, slow responses, oversized responses (low) |
 | `info-leak` | high / medium | Credential-like tokens or stack traces (high); server file paths (medium) |
-| `trust-boundary` | medium | A success `result` for a role, URI, or task-ownership probe |
-| `validation` | medium | A success `result` for malformed or unsupported input |
+| `trust-boundary` | medium | A success result for a role, URI, or task-ownership probe |
+| `validation` | medium | A success result for malformed or unsupported input |
 | `conformance` | low | Replies to notifications, non-JSON success bodies, wrong `jsonrpc` version, mismatched response IDs |
 
 A JSON-RPC error object, an HTTP 4xx, or a clean refusal is always a pass. For the `ids` category a `null` response ID is accepted, because the specification allows it when the request ID cannot be read.
@@ -173,11 +188,12 @@ Every run writes three files to `--out`:
 | `a2afuzz.report.html` | Self-contained report for humans, with light and dark themes. All endpoint content is HTML-escaped. |
 | `a2afuzz.sarif` | SARIF 2.1.0, ready for GitHub code scanning or any SARIF viewer |
 
-Reports can contain whatever the target sent back, including leaked secrets that triggered an `info-leak` finding. Treat them as sensitive. Request headers you pass with `-H` are never written to the reports.
+> [!WARNING]
+> Reports can contain whatever the target sent back, including leaked secrets that triggered an `info-leak` finding. Treat them as sensitive. Request headers you pass with `-H` are never written to the reports.
 
 ## Using it in CI
 
-A GitHub Actions job that starts your agent, fuzzes it, fails the build on medium or worse, and uploads the results to code scanning:
+A GitHub Actions job that starts your agent, fuzzes it, fails the build on `medium` or worse, and uploads the results to code scanning:
 
 ```yaml
 jobs:
@@ -228,7 +244,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`FuzzRunner.run()` raises `TargetAuthorizationError` before any network I/O if the URL is malformed or non-local without `authorized=True`. You can pass your own `transport` object (anything with `async send(url, body) -> TransportResponse`) to test non-HTTP transports or to unit-test your own oracles.
+`FuzzRunner.run()` raises `TargetAuthorizationError` before any network I/O if the URL is malformed, or non-local without `authorized=True`. You can pass your own transport object (anything with `async send(url, body) -> TransportResponse`) to test non-HTTP transports or to unit-test your own oracles.
 
 ## Limitations
 
@@ -242,7 +258,7 @@ asyncio.run(main())
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest            # unit, CLI, and end-to-end tests against the demo agent
+python -m pytest                  # unit, CLI, and end-to-end tests against the demo agent
 python -m ruff check .
 python -m ruff format --check .
 ```
@@ -258,8 +274,9 @@ a2afuzz/
   checks.py       Response oracles and severity thresholds
   report.py       JSON, HTML, and SARIF writers
   models.py       Dataclasses shared across modules
-examples/demo_agent.py   Vulnerable and hardened demo target
-tests/                   Unit, CLI, and end-to-end tests
+examples/
+  demo_agent.py   Vulnerable and hardened demo target
+tests/            Unit, CLI, and end-to-end tests
 ```
 
 CI runs lint and the full test suite on Python 3.10 to 3.14 (plus macOS and Windows), then builds the wheel, installs it into a clean environment, and checks that the hardened demo passes and the vulnerable demo is caught. See [CHANGELOG.md](CHANGELOG.md) for release notes.
